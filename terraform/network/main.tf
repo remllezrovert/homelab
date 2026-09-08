@@ -5,6 +5,11 @@ terraform {
     proxmox = {
       source = "bpg/proxmox"
     }
+
+    openwrt = {
+      source  = "joneshf/openwrt"
+      version = "0.0.20"
+    }
   }
 }
 
@@ -18,9 +23,29 @@ variable "proxmox_api_token" {
   type        = string
   sensitive   = true
 }
+
 variable "openwrt_root_password" {
-  type      = string
-  sensitive = true
+  description = "Root password configured in the OpenWrt container."
+  type        = string
+  sensitive   = true
+}
+
+variable "openwrt_ip" {
+  description = "Static IPv4 address intended for the OpenWrt container."
+  type        = string
+  default     = "192.168.2.101"
+}
+
+variable "openwrt_username" {
+  description = "Username used by the OpenWrt Terraform provider."
+  type        = string
+  default     = "root"
+}
+
+variable "openwrt_password" {
+  description = "Password used by the OpenWrt Terraform provider."
+  type        = string
+  sensitive   = true
 }
 
 provider "proxmox" {
@@ -29,65 +54,12 @@ provider "proxmox" {
   insecure  = true
 }
 
-
-
-resource "proxmox_virtual_environment_container" "openwrt" {
-  vm_id     = 101
-  node_name = "mgmt1"
-
-  description = "OpenWrt network utility: Terraform-managed DHCP/DNS"
-  tags        = ["terraform", "openwrt", "net-utils"]
-
-  started       = true
-  start_on_boot = true
-
-  unprivileged = false
-
-  operating_system {
-    template_file_id = "cephfs:vztmpl/openwrt-25.12.5-x86-64-rootfs.tar.gz"
-    type             = "unmanaged"
-  }
-
-  cpu {
-    cores = 1
-  }
-
-  memory {
-    dedicated = 500
-    swap      = 0
-  }
-
-  disk {
-    datastore_id = "proxpool"
-    size         = 2
-  }
-
-  network_interface {
-    name    = "eth0"
-    bridge  = "vmbr0"
-    vlan_id = 12
-  }
-
-  initialization {
-    hostname = "openwrt"
-
-    ip_config {
-      ipv4 {
-        address = "192.168.2.101/24"
-        gateway = "192.168.2.1"
-      }
-    }
-  }
-}
-
-
-
-
-
 output "openwrt_container_id" {
-  value = proxmox_virtual_environment_container.openwrt.vm_id
+  description = "Proxmox LXC container ID for OpenWrt."
+  value       = proxmox_virtual_environment_container.openwrt_01.vm_id
 }
 
 output "openwrt_container_name" {
-  value = "openwrt-01"
+  description = "OpenWrt container hostname."
+  value       = "openwrt-01"
 }
