@@ -1,0 +1,17 @@
+name: appdata          # base name, you will override this per install
+
+nfsBasePath: /srv/nas
+server: 192.168.2.200
+capacity: 50Gi
+
+pv:
+  accessModes:
+    - ReadWriteMany
+  reclaimPolicy: Retain
+  storageClassName: ""
+
+pvc:
+  namespace: default
+  accessModes:
+    - ReadWriteMany
+  storageClassName: ""

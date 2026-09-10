@@ -1,0 +1,20 @@
+certificatesResolvers:
+  letsencrypt-dns:
+    acme:
+      dnsChallenge:
+        delayBeforeCheck: 0
+        provider: cloudflare
+      email: admin@remllez.com
+      storage: /data/acme.json
+deployment:
+  podSpec:
+    dnsConfig:
+      nameservers:
+      - 10.96.0.10
+    dnsPolicy: None
+env:
+- name: CF_DNS_API_TOKEN
+  valueFrom:
+    secretKeyRef:
+      key: api-token
+      name: cloudflare-api-token-secret

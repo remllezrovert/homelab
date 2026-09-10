@@ -1,0 +1,28 @@
+# MetalLB Helm values for L2 mode only
+controller:
+  enabled: true
+  # Extra logging can help debugging
+  extraArgs:
+    - --log-level=info
+
+speaker:
+  enabled: true
+  # Force L2 mode
+  l2:
+    enabled: true
+    # Optionally, bind to specific interfaces
+    # interfaces:
+    #   - ens18
+  # Disable BGP entirely
+  bgp:
+    enabled: false
+
+# Optional: metrics for monitoring
+metrics:
+  enabled: true
+  serviceMonitor:
+    enabled: true
+
+# Use a dedicated namespace
+namespace: metallb-system
+

@@ -1,0 +1,22 @@
+architecture: standalone
+
+auth:
+  enabled: false
+
+master:
+  persistence:
+    enabled: true
+    existingClaim: redis-pvc
+
+replica:
+  replicaCount: 0
+  persistence:
+    enabled: false
+
+service:
+  type: ClusterIP
+  ports:
+    redis: 6379
+
+metrics:
+  enabled: false

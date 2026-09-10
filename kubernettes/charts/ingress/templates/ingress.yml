@@ -1,0 +1,48 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ .Values.name }}-service
+  namespace: default
+spec:
+  type: ClusterIP
+  ports:
+    - name: http
+      port: {{ .Values.port }}         # external service port
+      targetPort: {{ .Values.port }}   # container port
+  selector:
+    app.kubernetes.io/name: {{ .Values.name }}
+    app.kubernetes.io/instance: {{ .Values.name }}
+---
+apiVersion: traefik.io/v1alpha1
+kind: IngressRoute
+metadata:
+  name: {{ .Values.name }}-https
+  namespace: default
+spec:
+  entryPoints:
+    - websecure
+  routes:
+    - match: Host(`{{ .Values.name }}.remllez.com`)
+      kind: Rule
+      services:
+        - name: {{ .Values.name }}-service
+          port: {{ .Values.port }}     # use the same value here
+  tls:
+    certResolver: letsencrypt-dns
+---
+apiVersion: traefik.io/v1alpha1
+kind: IngressRoute
+metadata:
+  name: {{ .Values.name }}-http
+  namespace: default
+spec:
+  entryPoints:
+    - web
+  routes:
+    - match: Host(`{{ .Values.name }}.remllez.com`)
+      kind: Rule
+      middlewares:
+        - name: redirect-https
+      services:
+        - name: {{ .Values.name }}-service
+          port: {{ .Values.port }}     # and here

@@ -1,0 +1,32 @@
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: {{ .Values.name }}-pv
+spec:
+  capacity:
+    storage: {{ .Values.capacity }}
+  accessModes:
+    {{- range .Values.pv.accessModes }}
+    - {{ . }}
+    {{- end }}
+  persistentVolumeReclaimPolicy: {{ .Values.pv.reclaimPolicy }}
+  storageClassName: {{ .Values.pv.storageClassName | quote }}
+  nfs:
+    server: {{ .Values.server }}
+    path: {{ .Values.nfsBasePath }}/{{ .Values.name }}
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ .Values.name }}-pvc
+  namespace: {{ .Values.pvc.namespace }}
+spec:
+  accessModes:
+    {{- range .Values.pvc.accessModes }}
+    - {{ . }}
+    {{- end }}
+  resources:
+    requests:
+      storage: {{ .Values.capacity }}
+  storageClassName: {{ .Values.pvc.storageClassName | quote }}
+  volumeName: {{ .Values.name }}-pv

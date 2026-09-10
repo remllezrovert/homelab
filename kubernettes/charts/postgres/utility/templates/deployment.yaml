@@ -1,0 +1,60 @@
+##{{- $password := .Values.password | default (randAlphaNum 32) -}}
+#
+#
+{{- $secretName := printf "%s-db-admin" .Values.name -}}
+{{- $existingSecret := lookup "v1" "Secret" "postgres" $secretName -}}
+
+{{- $password := "" -}}
+
+{{- if $existingSecret }}
+  {{- $password = index $existingSecret.data "password" | b64dec -}}
+{{- else }}
+  {{- $password = randAlphaNum 32 -}}
+{{- end }}
+
+
+apiVersion: v1
+kind: Secret
+metadata:
+  name: {{ .Values.name }}-app
+  namespace: {{ .Values.clientNamespace }}
+type: kubernetes.io/basic-auth
+stringData:
+  username: {{ .Values.name }}_db_admin
+  password: {{ $password | quote }}
+  uri: postgresql://{{ .Values.name }}_db_admin:{{ $password }}@app-postgres.postgres.svc.cluster.local:5432/{{ .Values.name }}
+
+---
+apiVersion: postgresql.cnpg.io/v1
+kind: DatabaseRole
+metadata:
+  name: {{ .Values.name }}-db-admin
+  namespace: postgres
+spec:
+  cluster:
+    name: {{ .Values.clusterName }}
+  name: {{ .Values.name }}_db_admin
+  login: true
+  passwordSecret:
+    name: {{ .Values.name }}-db-admin
+---
+apiVersion: postgresql.cnpg.io/v1
+kind: Database
+metadata:
+  name: {{ .Values.name }}
+  namespace: postgres
+spec:
+  cluster:
+    name: {{ .Values.clusterName }}
+  name: {{ .Values.name }}
+  owner: {{ .Values.name }}_db_admin
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: {{ .Values.name }}-db-admin
+  namespace: postgres
+type: kubernetes.io/basic-auth
+stringData:
+  username: {{ .Values.name }}_db_admin
+  password: {{ $password | quote }}
