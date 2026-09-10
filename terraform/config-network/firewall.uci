@@ -1,0 +1,40 @@
+# ---------------------------------------------------------------------------
+# OpenWrt firewall
+#
+# OpenWrt routes/NATs:
+#   k8sctl: 10.8.0.0/24 -> 10.8.0.101 -> VLAN 12 -> 192.168.2.1
+#   k8swrk: 10.8.1.0/24 -> 10.8.1.101 -> VLAN 12 -> 192.168.2.1
+#
+# NAT occurs as traffic exits lan / br-lan / VLAN 12.
+# ---------------------------------------------------------------------------
+
+config zone 'lan'
+        option name 'lan'
+        list network 'lan'
+        option input 'ACCEPT'
+        option output 'ACCEPT'
+        option forward 'REJECT'
+        option masq '1'
+        option mtu_fix '1'
+
+config zone 'k8sctl'
+        option name 'k8sctl'
+        list network 'k8sctl'
+        option input 'ACCEPT'
+        option output 'ACCEPT'
+        option forward 'REJECT'
+
+config zone 'k8swrk'
+        option name 'k8swrk'
+        list network 'k8swrk'
+        option input 'ACCEPT'
+        option output 'ACCEPT'
+        option forward 'REJECT'
+
+config forwarding 'k8sctl_to_lan'
+        option src 'k8sctl'
+        option dest 'lan'
+
+config forwarding 'k8swrk_to_lan'
+        option src 'k8swrk'
+        option dest 'lan'
