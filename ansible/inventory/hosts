@@ -1,0 +1,9 @@
+[proxmox]
+mgmt1 ansible_host=192.168.2.11
+mgmt2 ansible_host=192.168.2.12
+mgmt3 ansible_host=192.168.2.13
+
+[openwrt]
+openwrt-01 ansible_host=192.168.2.2
+
+[k8s_control]

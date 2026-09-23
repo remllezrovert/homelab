@@ -2,11 +2,11 @@
 # OpenWrt provider and in-guest UCI network configuration
 #
 # This Terraform root manages OpenWrt UCI network configuration inside
-# Proxmox CT 101.
+# Proxmox CT 2.
 #
 # Prerequisites:
-# - infra-network has created and started CT 101.
-# - CT 101 is reachable at var.openwrt_ip over its VLAN 12 management network.
+# - infra-network has created and started CT 2.
+# - CT 2 is reachable at var.openwrt_ip over its VLAN 12 management network.
 # - LuCI RPC is available on TCP port 80.
 #
 # Proxmox SDN owns:
@@ -30,67 +30,33 @@ provider "openwrt" {
 
 # ---------------------------------------------------------------------------
 # Management network
-#
-# CT 101 eth0 is already a member port of the template-created br-lan bridge.
-#
+# CT 2 eth0 is already a member port of the template-created br-lan bridge.
 # OpenWrt topology:
-#   lan -> br-lan -> eth0 -> VLAN 12 -> 192.168.2.101/24
-#
-# Do not create a second "mgmt" interface directly on eth0. Doing so conflicts
-# with eth0's existing br-lan bridge membership and duplicates the management
-# IP address/subnet.
+#   lan -> br-lan -> eth0 -> VLAN 12 -> 192.168.2.2/24
 # ---------------------------------------------------------------------------
-
 resource "openwrt_network_interface" "lan" {
   id     = "lan"
   device = "br-lan"
   proto  = "static"
 
   ipaddr  = var.openwrt_ip
-  netmask = "255.255.255.0"
-  gateway = "192.168.2.1"
-
-  dns = [
-    "192.168.2.1",
-  ]
+  netmask = cidrnetmask(var.openwrt_management_network.cidr)
+  gateway = var.openwrt_management_network.gateway
+  dns     = var.openwrt_management_network.dns
 }
 
+
 # ---------------------------------------------------------------------------
-# Kubernetes control-plane network
-#
-# CT 101 eth1:
-#   Proxmox VNet:    k8sctl
-#   OpenWrt device:  eth1
-#   OpenWrt address: 10.8.0.101/24
-#
-# Proxmox EVPN gateway: 10.8.0.1
+# EVPN-backed OpenWrt interfaces
 # ---------------------------------------------------------------------------
 
-resource "openwrt_network_interface" "k8sctl" {
-  id     = "k8sctl"
-  device = "eth1"
+resource "openwrt_network_interface" "subnet" {
+  for_each = var.subnets
+
+  id     = each.key
+  device = each.value.openwrt_device
   proto  = "static"
 
-  ipaddr  = "10.8.0.101"
-  netmask = "255.255.255.0"
-}
-
-# ---------------------------------------------------------------------------
-# Kubernetes worker network
-#
-# CT 101 eth2:
-#   Proxmox VNet:    k8swrk
-#   OpenWrt device:  eth2
-#   OpenWrt address: 10.8.1.101/24
-#
-# Proxmox EVPN gateway: 10.8.1.1
-# ---------------------------------------------------------------------------
-
-resource "openwrt_network_interface" "k8swrk" {
-  id     = "k8swrk"
-  device = "eth2"
-  proto  = "static"
-
-  ipaddr  = "10.8.1.101"
-  netmask = "255.255.255.0"
+  ipaddr  = each.value.gateway
+  netmask = cidrnetmask(each.value.cidr)
 }

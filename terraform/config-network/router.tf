@@ -1,8 +1,9 @@
 # ---------------------------------------------------------------------------
 # Deploy OpenWrt firewall policy
 #
-# firewall.uci is staged to the router, validated with `fw4 check`, and then
-# atomically installed as /etc/config/firewall before the firewall is reloaded.
+# firewall.uci.tftpl is rendered from var.subnets, staged to the router,
+# validated with `fw4 check`, and atomically installed as /etc/config/firewall
+# before the firewall is restarted.
 #
 # `scp -O` forces the legacy SCP protocol. This is needed for OpenWrt systems
 # using Dropbear without an installed SFTP server, because modern OpenSSH scp
@@ -10,12 +11,19 @@
 # ---------------------------------------------------------------------------
 
 locals {
-  openwrt_firewall_uci = file("${path.module}/firewall.uci")
+  openwrt_firewall_uci = templatefile(
+    "${path.module}/firewall.uci.tftpl",
+    {
+      subnets = var.subnets
+    },
+  )
+
+  openwrt_firewall_uci_sha256 = sha256(local.openwrt_firewall_uci)
 }
 
 resource "terraform_data" "openwrt_firewall" {
   triggers_replace = [
-    filesha256("${path.module}/firewall.uci"),
+    local.openwrt_firewall_uci_sha256,
   ]
 
   provisioner "local-exec" {
@@ -80,7 +88,6 @@ FIREWALL_UCI
 
   depends_on = [
     openwrt_network_interface.lan,
-    openwrt_network_interface.k8sctl,
-    openwrt_network_interface.k8swrk,
+    openwrt_network_interface.subnet,
   ]
 }

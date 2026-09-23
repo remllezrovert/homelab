@@ -16,12 +16,15 @@ terraform {
 # Proxmox SDN gateway configuration, and SNAT are managed by infra-network.
 #
 # This config-network Terraform root manages in-guest OpenWrt UCI state only.
+#
+# Values:
+# - openwrt_ip and openwrt_username: ../terraform.tfvars
+# - openwrt_password: TF_VAR_openwrt_password from ../.env
 # ---------------------------------------------------------------------------
 
 variable "openwrt_ip" {
   description = "Static management IPv4 address of the reachable OpenWrt LuCI RPC endpoint."
   type        = string
-  default     = "192.168.2.101"
 
   validation {
     condition     = can(cidrhost("${var.openwrt_ip}/32", 0))
@@ -32,7 +35,6 @@ variable "openwrt_ip" {
 variable "openwrt_username" {
   description = "Username used by the OpenWrt LuCI RPC provider."
   type        = string
-  default     = "root"
 
   validation {
     condition     = length(trimspace(var.openwrt_username)) > 0
@@ -47,7 +49,7 @@ variable "openwrt_password" {
 
   validation {
     condition     = length(var.openwrt_password) > 0
-    error_message = "openwrt_password must not be empty."
+    error_message = "openwrt_password must not be empty. Set TF_VAR_openwrt_password in ../.env."
   }
 }
 

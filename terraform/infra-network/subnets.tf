@@ -1,81 +1,76 @@
 # ---------------------------------------------------------------------------
 # EVPN VNet subnet services and OpenWrt container
 #
+# This file owns:
+# - Proxmox SDN subnet gateway/SNAT declarations
+# - Applying those declarations
+# - The OpenWrt CT lifecycle
+# - OpenWrt CT NIC attachment to every var.subnets EVPN VNet
+#
 # Proxmox SDN owns:
 # - EVPN/VNet connectivity
-# - Gateway addresses
+# - Gateway addresses declared below
 # - SNAT through EVPN exit nodes
 #
-# OpenWrt CT 101 owns:
-# - DHCP lease service
-# - DNS service
+# OpenWrt owns:
+# - DHCP and DNS service
+# - In-guest UCI configuration, managed in config-network
 #
-# OpenWrt UCI configuration is intentionally kept in openwrt.tf.
+# The canonical VNet/subnet values come from var.subnets, supplied by this
+# root module's terraform.tfvars.
 # ---------------------------------------------------------------------------
 
 # ---------------------------------------------------------------------------
-# EVPN subnets
+# Proxmox SDN subnet declarations
+#
+# One PVE subnet object per var.subnets map item:
+#
+#   proxmox_sdn_subnet.subnet["k8sctl"]
+#   proxmox_sdn_subnet.subnet["k8swrk"]
 # ---------------------------------------------------------------------------
 
-# Kubernetes control-plane network:
-# VNet:    k8sctl
-# Subnet:  10.8.0.0/24
-# Gateway: 10.8.0.1 (openwrt)
-# DHCP/DNS: OpenWrt at 10.8.0.101
-resource "proxmox_sdn_subnet" "k8s_control" {
-  vnet    = proxmox_sdn_vnet.k8s_control.id
-  cidr    = "10.8.0.0/24"
-  gateway = "10.8.0.1"
-  snat    = true
+resource "proxmox_sdn_subnet" "subnet" {
+  for_each = var.subnets
+
+  vnet    = proxmox_sdn_vnet.subnet[each.key].id
+  cidr    = each.value.cidr
+  gateway = each.value.gateway
+  snat    = each.value.snat
 
   depends_on = [
-    proxmox_sdn_vnet.k8s_control,
+    proxmox_sdn_vnet.subnet,
   ]
 }
-
-# Kubernetes worker network:
-# VNet:    k8swrk
-# Subnet:  10.8.1.0/24
-# Gateway: 10.8.1.1 (openwrt) 
-# DHCP/DNS: OpenWrt at 10.8.1.1
-resource "proxmox_sdn_subnet" "k8s_workers" {
-  vnet    = proxmox_sdn_vnet.k8s_workers.id
-  cidr    = "10.8.1.0/24"
-  gateway = "10.8.1.1"
-  snat    = true
-
-  depends_on = [
-    proxmox_sdn_vnet.k8s_workers,
-  ]
-}
-
-# ---------------------------------------------------------------------------
-# Apply EVPN subnet, gateway, and SNAT configuration before CT 101 connects.
-# ---------------------------------------------------------------------------
-
 resource "proxmox_sdn_applier" "subnet_applier" {
+  lifecycle {
+    replace_triggered_by = [
+      proxmox_sdn_subnet.subnet,
+    ]
+  }
+
   depends_on = [
-    proxmox_sdn_subnet.k8s_control,
-    proxmox_sdn_subnet.k8s_workers,
+    proxmox_sdn_subnet.subnet,
   ]
 }
 
 # ---------------------------------------------------------------------------
-# OpenWrt CT 101 infrastructure
+# OpenWrt CT infrastructure
 #
-# eth0: vmbr0 access VLAN 12 -> 192.168.2.101/24
-# eth1: k8sctl EVPN VNet     -> 10.8.0.101/24
-# eth2: k8swrk EVPN VNet     -> 10.8.1.101/24
+# eth0 is the fixed management NIC:
+#   vmbr0 + VLAN 12 -> 192.168.2.2/24
 #
-# The Proxmox provider owns the LXC lifecycle and NIC attachments.
-# The OpenWrt provider owns in-guest UCI configuration in openwrt.tf.
+# Every extra NIC is generated from var.subnets:
+#   k8sctl -> eth1 -> k8sctl VNet
+#   k8swrk -> eth2 -> k8swrk VNet
+#
+# The VNet itself is read from the corresponding for_each-created SDN VNet.
 # ---------------------------------------------------------------------------
 
 resource "proxmox_virtual_environment_container" "openwrt_01" {
   vm_id     = 101
   node_name = "mgmt1"
 
-  description = "OpenWrt DHCP/DNS server for k8sctl and k8swrk EVPN VNets"
+  description = "OpenWrt DHCP/DNS server for Terraform-managed EVPN VNets"
   tags        = ["terraform", "openwrt", "dns", "dhcp", "net-utils"]
 
   started       = true
@@ -83,7 +78,7 @@ resource "proxmox_virtual_environment_container" "openwrt_01" {
   unprivileged  = false
 
   clone {
-    vm_id        = 905
+    vm_id        = 906
     node_name    = "mgmt1"
     datastore_id = "proxpool"
     full         = true
@@ -103,34 +98,34 @@ resource "proxmox_virtual_environment_container" "openwrt_01" {
     size         = 2
   }
 
-  # Management network.
-  #
-  # Proxmox applies VLAN 12 on vmbr0. OpenWrt sees eth0 as an
-  # untagged interface within the container.
+  # Fixed management NIC.
   network_interface {
     name    = "eth0"
     bridge  = "vmbr0"
     vlan_id = 12
   }
 
-  # Kubernetes control-plane EVPN VNet.
-  network_interface {
-    name   = "eth1"
-    bridge = proxmox_sdn_vnet.k8s_control.id
-  }
+  # One generated NIC per canonical subnet definition.
+  #
+  # For current terraform.tfvars:
+  #   eth1 -> k8sctl
+  #   eth2 -> k8swrk
+  dynamic "network_interface" {
+    for_each = var.subnets
 
-  # Kubernetes worker EVPN VNet.
-  network_interface {
-    name   = "eth2"
-    bridge = proxmox_sdn_vnet.k8s_workers.id
+    iterator = subnet
+
+    content {
+      name   = subnet.value.openwrt_device
+      bridge = proxmox_sdn_vnet.subnet[subnet.key].id
+    }
   }
 
   initialization {
     hostname = "openwrt-01"
 
-    # This supplies Proxmox LXC primary-interface metadata and establishes
-    # initial management connectivity. In-guest UCI configuration is managed
-    # by the OpenWrt provider in openwrt.tf.
+    # Proxmox LXC initial management connectivity.
+    # In-guest UCI management is configured by config-network.
     ip_config {
       ipv4 {
         address = "${var.openwrt_ip}/24"
@@ -140,6 +135,8 @@ resource "proxmox_virtual_environment_container" "openwrt_01" {
   }
 
   depends_on = [
+    proxmox_sdn_applier.vnet_applier,
     proxmox_sdn_applier.subnet_applier,
   ]
 }
+

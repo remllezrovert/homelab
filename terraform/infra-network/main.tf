@@ -33,7 +33,7 @@ variable "openwrt_root_password" {
 variable "openwrt_ip" {
   description = "Static IPv4 address intended for the OpenWrt container."
   type        = string
-  default     = "192.168.2.101"
+  default     = "192.168.2.2"
 }
 
 variable "openwrt_username" {

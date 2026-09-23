@@ -1,16 +1,21 @@
 # ---------------------------------------------------------------------------
 # OpenWrt DHCP and DNS
 #
-# Assumptions:
+# The OpenWrt router must already exist and be reachable at var.openwrt_ip.
 #
-#   - The OpenWrt router already exists and is reachable at var.openwrt_ip.
-#   - UCI interface sections mgmt, k8sctl, and k8swrk already exist.
-#   - eth1 is already attached to the k8sctl network.
-#   - eth2 is already attached to the k8swrk network.
+# This root manages:
+# - The existing dnsmasq UCI section.
+# - One DHCPv4 scope per entry in var.subnets.
 #
-# This root manages the existing dnsmasq UCI section and the DHCP scope
-# sections for k8sctl and k8swrk. It does not own Proxmox resources or
-# OpenWrt network-interface sections.
+# Each subnet entry must identify an existing OpenWrt UCI network interface
+# whose name matches the subnet map key.
+#
+# Example:
+#
+#   subnets.k8sctl
+#     -> UCI interface k8sctl
+#     -> OpenWrt DHCP section k8sctl
+#     -> pool begins at subnet host offset 3
 # ---------------------------------------------------------------------------
 
 # ---------------------------------------------------------------------------
@@ -20,15 +25,14 @@
 #
 #   uci show dhcp | grep '=dnsmasq'
 # ---------------------------------------------------------------------------
-
 resource "openwrt_dhcp_dnsmasq" "main" {
   id = "cfg01411c"
 
   authoritative     = true
-  domain            = "home.arpa"
+  domain            = var.dns_domain
   domainneeded      = true
   expandhosts       = true
-  local             = "/home.arpa/"
+  local             = "/${var.dns_domain}/"
   localise_queries  = true
   localservice      = true
   readethers        = true
@@ -38,39 +42,31 @@ resource "openwrt_dhcp_dnsmasq" "main" {
   resolvfile = "/tmp/resolv.conf.d/resolv.conf.auto"
 }
 
+
 # ---------------------------------------------------------------------------
-# DHCP scope: k8sctl
-#
-# Existing OpenWrt interface: k8sctl / eth1 / 10.8.0.101
-# Dynamic pool:               10.8.0.50 through 10.8.0.100
-# ---------------------------------------------------------------------------
+# DHCPv4 scopes for EVPN-backed OpenWrt interfaces
 
-resource "openwrt_dhcp_dhcp" "k8sctl" {
-  id = "k8sctl"
+locals {
+  dhcp_pool_start = 3
 
-  interface = "k8sctl"
-  start     = 50
-  limit     = 51
-  leasetime = "12h"
+  dhcp_subnets = {
+    for name, subnet in var.subnets : name => merge(subnet, {
+      prefix_length = tonumber(split("/", subnet.cidr)[1])
 
-  depends_on = [
-    openwrt_dhcp_dnsmasq.main,
-  ]
+      dhcp_pool_limit = pow(2, 32 - tonumber(split("/", subnet.cidr)[1])) - local.dhcp_pool_start - 1
+    })
+  }
 }
 
-# ---------------------------------------------------------------------------
-# DHCP scope: k8swrk
-#
-# Existing OpenWrt interface: k8swrk / eth2 / 10.8.1.101
-# Dynamic pool:               10.8.1.50 through 10.8.1.100
-# ---------------------------------------------------------------------------
+resource "openwrt_dhcp_dhcp" "subnet" {
+  for_each = local.dhcp_subnets
 
-resource "openwrt_dhcp_dhcp" "k8swrk" {
-  id = "k8swrk"
+  id        = each.key
+  interface = openwrt_network_interface.subnet[each.key].id
 
-  interface = "k8swrk"
-  start     = 50
-  limit     = 51
+  dhcpv4    = "server"
+  start     = local.dhcp_pool_start
+  limit     = each.value.dhcp_pool_limit
   leasetime = "12h"
 
   depends_on = [
