@@ -3,8 +3,8 @@ set -euo pipefail
 
 script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 
-infra_dir="${script_dir}/infra-network"
-config_dir="${script_dir}/config-network"
+infra_dir="${script_dir}/wrt-evpn"
+config_dir="${script_dir}/network"
 variables_file="${script_dir}/terraform.tfvars"
 
 if [[ ! -f "${script_dir}/.env" ]]; then
@@ -96,9 +96,9 @@ run_terraform_root() {
 }
 
 if [[ "${operation}" == "create" ]]; then
-  run_terraform_root "infra-network" "${infra_dir}" "create"
-  run_terraform_root "config-network" "${config_dir}" "create"
+  run_terraform_root "wrt-evpn" "${infra_dir}" "create"
+  run_terraform_root "network" "${config_dir}" "create"
 else
-  run_terraform_root "config-network" "${config_dir}" "destroy"
-  run_terraform_root "infra-network" "${infra_dir}" "destroy"
+  run_terraform_root "network" "${config_dir}" "destroy"
+  run_terraform_root "wrt-evpn" "${infra_dir}" "destroy"
 fi

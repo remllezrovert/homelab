@@ -1,29 +1,21 @@
 # ---------------------------------------------------------------------------
 # Proxmox OpenFabric / EVPN / OpenWrt infrastructure
-#
 # This is the non-secret source of truth for:
 # - Proxmox OpenFabric nodes
 # - EVPN controller and zone behavior
 # - EVPN VNet IDs, VNIs, subnet CIDRs, gateways, and SNAT
 # - OpenWrt CT management identity and EVPN NIC assignments
-#
 # Secrets belong in .env, never here.
-# ---------------------------------------------------------------------------
 
 # ---------------------------------------------------------------------------
 # Proxmox API
-#
 # `proxmox_api_endpoint` and `proxmox_api_token` should normally come from:
-#
 #   TF_VAR_proxmox_api_endpoint
 #   TF_VAR_proxmox_api_token
-#
 # in .env. Do not duplicate credentials here.
-# ---------------------------------------------------------------------------
 
 # ---------------------------------------------------------------------------
 # OpenFabric underlay
-# ---------------------------------------------------------------------------
 
 openfabric = {
   id        = "main"
@@ -82,14 +74,6 @@ evpn = {
   rt_import = "65000:65000"
 }
 
-# ---------------------------------------------------------------------------
-# EVPN/OpenWrt workload subnets
-#
-# `gateway` is the IPv4 address assigned to OpenWrt on the corresponding
-# EVPN-backed network interface. PVE's EVPN anycast gateway remains `.1`;
-# OpenWrt uses `.2` on each subnet.
-#
-# `openwrt_device` must match the interface order presented to CT 101.
 # ---------------------------------------------------------------------------
 
 subnets = {

@@ -6,21 +6,13 @@ terraform {
       source  = "joneshf/openwrt"
       version = "0.0.20"
     }
+
+    proxmox = {
+      source  = "bpg/proxmox"
+      version = "~> 0.105"
+    }
   }
 }
-
-# ---------------------------------------------------------------------------
-# OpenWrt provider connection variables
-#
-# CT 101 itself, its Proxmox NICs, VLAN 12 attachment, EVPN VNet attachments,
-# Proxmox SDN gateway configuration, and SNAT are managed by infra-network.
-#
-# This config-network Terraform root manages in-guest OpenWrt UCI state only.
-#
-# Values:
-# - openwrt_ip and openwrt_username: ../terraform.tfvars
-# - openwrt_password: TF_VAR_openwrt_password from ../.env
-# ---------------------------------------------------------------------------
 
 variable "openwrt_ip" {
   description = "Static management IPv4 address of the reachable OpenWrt LuCI RPC endpoint."
@@ -51,6 +43,40 @@ variable "openwrt_password" {
     condition     = length(var.openwrt_password) > 0
     error_message = "openwrt_password must not be empty. Set TF_VAR_openwrt_password in ../.env."
   }
+}
+
+variable "proxmox_api_endpoint" {
+  description = "Proxmox VE API endpoint, for example https://mgmt3:8006."
+  type        = string
+  sensitive   = true
+
+  validation {
+    condition     = can(regex("^https?://", var.proxmox_api_endpoint))
+    error_message = "proxmox_api_endpoint must begin with http:// or https://."
+  }
+}
+
+variable "proxmox_api_token" {
+  description = "Proxmox VE API token."
+  type        = string
+  sensitive   = true
+
+  validation {
+    condition     = length(trimspace(var.proxmox_api_token)) > 0
+    error_message = "proxmox_api_token must not be empty."
+  }
+}
+
+variable "proxmox_insecure" {
+  description = "Skip TLS certificate verification for the Proxmox VE API."
+  type        = bool
+  default     = true
+}
+
+provider "proxmox" {
+  endpoint  = var.proxmox_api_endpoint
+  api_token = var.proxmox_api_token
+  insecure  = var.proxmox_insecure
 }
 
 output "openwrt_management_url" {
