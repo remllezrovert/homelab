@@ -6,6 +6,13 @@
 #
 # Input:
 #   ../terraform.tfvars -> subnets
+#
+# Policy:
+#   - lan is the trusted controller/management VLAN and Internet uplink.
+#   - lan may initiate connections to every declared VNet.
+#   - Each VNet may use public IPv4 Internet egress through lan.
+#   - Each VNet is denied access to private/local IPv4 ranges through lan.
+#   - Statefully tracked reply traffic remains allowed.
 # ---------------------------------------------------------------------------
 
 config defaults
@@ -14,6 +21,7 @@ config defaults
         option forward 'REJECT'
         option synflood_protect '1'
 
+# OpenWrt management/uplink interface. NAT occurs for traffic leaving lan.
 config zone 'lan'
         option name 'lan'
         list network 'lan'
@@ -24,6 +32,11 @@ config zone 'lan'
         option mtu_fix '1'
 
 %{ for name, subnet in subnets ~}
+# ---------------------------------------------------------------------------
+# VNet: ${name}
+# CIDR: ${subnet.cidr}
+# ---------------------------------------------------------------------------
+
 config zone '${name}'
         option name '${name}'
         list network '${name}'
@@ -31,8 +44,67 @@ config zone '${name}'
         option output 'ACCEPT'
         option forward 'REJECT'
 
+# Controller / management-LAN access to nodes in this VNet.
 config forwarding 'lan_to_${name}'
         option src 'lan'
         option dest '${name}'
+
+# Public Internet egress through the management/uplink interface.
+config forwarding '${name}_to_lan'
+        option src '${name}'
+        option dest 'lan'
+
+# Do not permit a node in this VNet to use lan as a route into any RFC1918
+# network. This prevents upstream-router hairpin / EVPN traversal.
+config rule '${name}_deny_private_10'
+        option name 'Reject ${name} to private 10/8'
+        option src '${name}'
+        option dest 'lan'
+        option dest_ip '10.0.0.0/8'
+        option target 'REJECT'
+
+config rule '${name}_deny_private_172'
+        option name 'Reject ${name} to private 172.16/12'
+        option src '${name}'
+        option dest 'lan'
+        option dest_ip '172.16.0.0/12'
+        option target 'REJECT'
+
+config rule '${name}_deny_private_192'
+        option name 'Reject ${name} to private 192.168/16'
+        option src '${name}'
+        option dest 'lan'
+        option dest_ip '192.168.0.0/16'
+        option target 'REJECT'
+
+# Block non-public IPv4 destination ranges that should never be Internet
+# egress targets. These apply only to forwarded VNet -> lan traffic.
+config rule '${name}_deny_cgnat'
+        option name 'Reject ${name} to CGNAT 100.64/10'
+        option src '${name}'
+        option dest 'lan'
+        option dest_ip '100.64.0.0/10'
+        option target 'REJECT'
+
+config rule '${name}_deny_link_local'
+        option name 'Reject ${name} to link-local IPv4'
+        option src '${name}'
+        option dest 'lan'
+        option dest_ip '169.254.0.0/16'
+        option target 'REJECT'
+
+config rule '${name}_deny_loopback'
+        option name 'Reject ${name} to loopback IPv4'
+        option src '${name}'
+        option dest 'lan'
+        option dest_ip '127.0.0.0/8'
+        option target 'REJECT'
+
+config rule '${name}_deny_multicast_reserved'
+        option name 'Reject ${name} to multicast/reserved IPv4'
+        option src '${name}'
+        option dest 'lan'
+        option dest_ip '224.0.0.0/4'
+        option target 'REJECT'
 
 %{ endfor ~}

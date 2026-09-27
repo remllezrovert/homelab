@@ -1,0 +1,427 @@
+---
+- name: Prepare and bootstrap Ubuntu/Debian Kubernetes control-plane nodes
+  hosts: k8s_control_planes
+  become: true
+  gather_facts: true
+
+  vars:
+    # Used only in the pkgs.k8s.io repository URL. This is major.minor only.
+    kubernetes_minor_version: "v1.36"
+
+    # Used in kubeadm ClusterConfiguration. This must be a full semantic
+    # version: major.minor.patch. Match it to the installed kubeadm version.
+    kubernetes_version: "v1.36.4"
+
+    kubernetes_apt_repository: >-
+      https://pkgs.k8s.io/core:/stable:/{{ kubernetes_minor_version }}/deb/
+
+    kubernetes_apt_key_url: >-
+      https://pkgs.k8s.io/core:/stable:/{{ kubernetes_minor_version }}/deb/Release.key
+
+    kubernetes_apt_keyring: /etc/apt/keyrings/kubernetes-apt-keyring.gpg
+    kubernetes_apt_source: /etc/apt/sources.list.d/kubernetes.list
+
+    containerd_config: /etc/containerd/config.toml
+    containerd_socket: unix:///run/containerd/containerd.sock
+
+    # First control plane:
+    # Run with: -e kubeadm_init_enabled=true
+    #
+    # Additional control planes:
+    # Leave kubeadm_init_enabled=false.
+    # Set kubeadm_control_plane_join_enabled=true and provide a complete
+    # kubeadm join command containing --control-plane and --certificate-key.
+    #
+    # Never enable both modes in one run.
+    kubeadm_init_enabled: false
+    kubeadm_control_plane_join_enabled: false
+    kubeadm_control_plane_join_command: ""
+
+    # For a multi-control-plane cluster, replace this with a stable VIP or
+    # load-balancer DNS name before creating the cluster.
+    kubeadm_control_plane_endpoint: "10.8.0.101:6443"
+
+    # Compatible with Calico's standard default Pod CIDR.
+    kubeadm_pod_network_cidr: "192.168.0.0/16"
+    kubeadm_service_cidr: "10.96.0.0/12"
+    kubeadm_cluster_name: "kubernetes"
+
+    kubeadm_init_config: /etc/kubernetes/kubeadm-init.yaml
+
+    kubectl_user: ansible
+    kubectl_user_home: /home/ansible
+    kubectl_kubeconfig: /home/ansible/.kube/config
+
+  pre_tasks:
+    - name: Assert supported Linux distribution
+      ansible.builtin.assert:
+        that:
+          - ansible_os_family == "Debian"
+          - ansible_distribution in ["Debian", "Ubuntu"]
+        fail_msg: >-
+          This playbook supports Debian and Ubuntu control-plane nodes only.
+          The detected distribution is {{ ansible_distribution }}
+          (family: {{ ansible_os_family }}).
+
+    - name: Assert a supported systemd host
+      ansible.builtin.assert:
+        that:
+          - ansible_service_mgr == "systemd"
+        fail_msg: Kubernetes control-plane nodes require systemd for this playbook.
+
+    - name: Assert only one control-plane action mode is enabled
+      ansible.builtin.assert:
+        that:
+          - not (
+              (kubeadm_init_enabled | bool)
+              and
+              (kubeadm_control_plane_join_enabled | bool)
+            )
+        fail_msg: >-
+          Enable only one of kubeadm_init_enabled or
+          kubeadm_control_plane_join_enabled in a single run.
+
+    - name: Assert first-control-plane initialization settings
+      ansible.builtin.assert:
+        that:
+          - kubeadm_control_plane_endpoint | length > 0
+          - kubeadm_pod_network_cidr | length > 0
+          - kubeadm_service_cidr | length > 0
+        fail_msg: >-
+          Set kubeadm_control_plane_endpoint, kubeadm_pod_network_cidr, and
+          kubeadm_service_cidr before enabling kubeadm_init_enabled.
+      when: kubeadm_init_enabled | bool
+
+    - name: Assert Kubernetes version is full semantic version
+      ansible.builtin.assert:
+        that:
+          - kubernetes_version is match('^v[0-9]+\\.[0-9]+\\.[0-9]+$')
+        fail_msg: >-
+          kubernetes_version must be a full Kubernetes semantic version such
+          as v1.36.4; got {{ kubernetes_version }}.
+
+    - name: Assert additional control-plane join settings
+      ansible.builtin.assert:
+        that:
+          - kubeadm_control_plane_join_command | length > 0
+          - kubeadm_control_plane_join_command is match('^kubeadm join ')
+          - "'--control-plane' in kubeadm_control_plane_join_command"
+          - "'--certificate-key' in kubeadm_control_plane_join_command"
+        fail_msg: >-
+          kubeadm_control_plane_join_command must be the complete control-plane
+          join command with both --control-plane and --certificate-key.
+      when: kubeadm_control_plane_join_enabled | bool
+
+  tasks:
+    - name: Update APT cache and install prerequisite packages
+      ansible.builtin.apt:
+        name:
+          - apt-transport-https
+          - ca-certificates
+          - curl
+          - gpg
+          - containerd
+          - conntrack
+          - iptables
+          - socat
+        state: present
+        update_cache: true
+        cache_valid_time: 3600
+
+    - name: Disable active swap immediately
+      ansible.builtin.command:
+        cmd: swapoff -a
+      changed_when: ansible_swaptotal_mb | int > 0
+
+    - name: Remove swap entries from /etc/fstab
+      ansible.builtin.replace:
+        path: /etc/fstab
+        regexp: '^(?!#)(.+\s+swap\s+.+)$'
+        replace: '# \1'
+        backup: true
+
+    - name: Find systemd swap unit files
+      ansible.builtin.find:
+        paths:
+          - /etc/systemd/system
+          - /run/systemd/system
+          - /usr/lib/systemd/system
+          - /lib/systemd/system
+        patterns: "*.swap"
+        file_type: file
+        recurse: false
+      register: systemd_swap_units
+
+    - name: Disable discovered systemd swap units
+      ansible.builtin.systemd_service:
+        name: "{{ item.path | basename }}"
+        enabled: false
+        state: stopped
+      loop: "{{ systemd_swap_units.files }}"
+      loop_control:
+        label: "{{ item.path }}"
+      failed_when: false
+
+    - name: Persist Kubernetes kernel modules
+      ansible.builtin.copy:
+        dest: /etc/modules-load.d/kubernetes.conf
+        owner: root
+        group: root
+        mode: "0644"
+        content: |
+          overlay
+          br_netfilter
+
+    - name: Load overlay kernel module
+      community.general.modprobe:
+        name: overlay
+        state: present
+
+    - name: Load br_netfilter kernel module
+      community.general.modprobe:
+        name: br_netfilter
+        state: present
+
+    - name: Configure Kubernetes kernel networking parameters
+      ansible.builtin.copy:
+        dest: /etc/sysctl.d/99-kubernetes-cri.conf
+        owner: root
+        group: root
+        mode: "0644"
+        content: |
+          net.bridge.bridge-nf-call-iptables = 1
+          net.bridge.bridge-nf-call-ip6tables = 1
+          net.ipv4.ip_forward = 1
+
+    - name: Apply system sysctl configuration
+      ansible.builtin.command:
+        cmd: sysctl --system
+      changed_when: false
+
+    - name: Ensure containerd configuration directory exists
+      ansible.builtin.file:
+        path: "{{ containerd_config | dirname }}"
+        state: directory
+        owner: root
+        group: root
+        mode: "0755"
+
+    - name: Generate containerd default configuration when absent
+      ansible.builtin.shell:
+        cmd: |
+          set -o pipefail
+          containerd config default > "{{ containerd_config }}"
+        creates: "{{ containerd_config }}"
+        executable: /bin/bash
+      notify: Restart containerd
+
+    - name: Configure containerd to use systemd cgroups
+      ansible.builtin.replace:
+        path: "{{ containerd_config }}"
+        regexp: '^\s*SystemdCgroup\s*=\s*false\s*$'
+        replace: '            SystemdCgroup = true'
+      notify: Restart containerd
+
+    - name: Ensure containerd CRI plugin is not disabled
+      ansible.builtin.replace:
+        path: "{{ containerd_config }}"
+        regexp: '^\s*disabled_plugins\s*=\s*\[(.*)"cri"(.*)\]\s*$'
+        replace: 'disabled_plugins = []'
+      notify: Restart containerd
+
+    - name: Enable and start containerd
+      ansible.builtin.systemd_service:
+        name: containerd
+        enabled: true
+        state: started
+        daemon_reload: true
+
+    - name: Flush handlers before Kubernetes package installation
+      ansible.builtin.meta: flush_handlers
+
+    - name: Create APT keyring directory
+      ansible.builtin.file:
+        path: /etc/apt/keyrings
+        state: directory
+        owner: root
+        group: root
+        mode: "0755"
+
+    - name: Download Kubernetes repository signing key
+      ansible.builtin.get_url:
+        url: "{{ kubernetes_apt_key_url }}"
+        dest: /tmp/kubernetes-apt-keyring.asc
+        owner: root
+        group: root
+        mode: "0644"
+        force: true
+
+    - name: Install Kubernetes repository signing key
+      ansible.builtin.command:
+        cmd: >-
+          gpg --dearmor
+          --yes
+          --output {{ kubernetes_apt_keyring }}
+          /tmp/kubernetes-apt-keyring.asc
+      changed_when: false
+
+    - name: Configure Kubernetes APT repository
+      ansible.builtin.copy:
+        dest: "{{ kubernetes_apt_source }}"
+        owner: root
+        group: root
+        mode: "0644"
+        content: |
+          deb [signed-by={{ kubernetes_apt_keyring }}] {{ kubernetes_apt_repository }} /
+
+    - name: Install Kubernetes control-plane packages
+      ansible.builtin.apt:
+        name:
+          - kubelet
+          - kubeadm
+          - kubectl
+        state: present
+        update_cache: true
+
+    - name: Hold Kubernetes packages at the installed version
+      ansible.builtin.dpkg_selections:
+        name: "{{ item }}"
+        selection: hold
+      loop:
+        - kubelet
+        - kubeadm
+        - kubectl
+
+    - name: Enable kubelet
+      ansible.builtin.systemd_service:
+        name: kubelet
+        enabled: true
+        state: started
+
+    - name: Verify swap is disabled
+      ansible.builtin.command:
+        cmd: swapon --show --noheadings
+      register: swapon_result
+      changed_when: false
+      failed_when: swapon_result.stdout | trim | length > 0
+
+    - name: Verify required kernel modules are loaded
+      ansible.builtin.command:
+        cmd: lsmod
+      register: lsmod_result
+      changed_when: false
+      failed_when: >-
+        ('overlay' not in lsmod_result.stdout)
+        or ('br_netfilter' not in lsmod_result.stdout)
+
+    - name: Verify IPv4 forwarding is enabled
+      ansible.builtin.command:
+        cmd: sysctl -n net.ipv4.ip_forward
+      register: ip_forward_result
+      changed_when: false
+      failed_when: ip_forward_result.stdout | trim != "1"
+
+    - name: Verify containerd is active
+      ansible.builtin.command:
+        cmd: systemctl is-active containerd
+      register: containerd_active
+      changed_when: false
+      failed_when: containerd_active.stdout | trim != "active"
+
+    - name: Verify containerd uses systemd cgroups
+      ansible.builtin.command:
+        cmd: >-
+          grep -E
+          '^[[:space:]]*SystemdCgroup[[:space:]]*=[[:space:]]*true'
+          {{ containerd_config }}
+      changed_when: false
+
+    - name: Check whether this node already belongs to a Kubernetes cluster
+      ansible.builtin.stat:
+        path: /etc/kubernetes/admin.conf
+      register: kubernetes_admin_conf
+
+    - name: Write kubeadm initialization configuration
+      ansible.builtin.copy:
+        dest: "{{ kubeadm_init_config }}"
+        owner: root
+        group: root
+        mode: "0600"
+        content: |
+          apiVersion: kubeadm.k8s.io/v1beta4
+          kind: InitConfiguration
+          localAPIEndpoint:
+            advertiseAddress: "{{ ansible_host }}"
+            bindPort: 6443
+          nodeRegistration:
+            criSocket: "{{ containerd_socket }}"
+            name: "{{ inventory_hostname }}"
+          ---
+          apiVersion: kubeadm.k8s.io/v1beta4
+          kind: ClusterConfiguration
+          clusterName: "{{ kubeadm_cluster_name }}"
+          controlPlaneEndpoint: "{{ kubeadm_control_plane_endpoint }}"
+          kubernetesVersion: "{{ kubernetes_version }}"
+          networking:
+            podSubnet: "{{ kubeadm_pod_network_cidr }}"
+            serviceSubnet: "{{ kubeadm_service_cidr }}"
+          apiServer:
+            certSANs:
+              - "{{ ansible_host }}"
+              - "{{ inventory_hostname }}"
+      when:
+        - kubeadm_init_enabled | bool
+        - not kubernetes_admin_conf.stat.exists
+
+    - name: Initialize the first Kubernetes control plane
+      ansible.builtin.command:
+        cmd: >-
+          kubeadm init
+          --config {{ kubeadm_init_config }}
+          --upload-certs
+        creates: /etc/kubernetes/admin.conf
+      when:
+        - kubeadm_init_enabled | bool
+        - not kubernetes_admin_conf.stat.exists
+      register: kubeadm_init_result
+
+    - name: Join an additional Kubernetes control plane
+      ansible.builtin.command:
+        cmd: "{{ kubeadm_control_plane_join_command }} --cri-socket {{ containerd_socket }}"
+        creates: /etc/kubernetes/admin.conf
+      when:
+        - kubeadm_control_plane_join_enabled | bool
+        - not kubernetes_admin_conf.stat.exists
+      no_log: true
+
+    - name: Create kubeconfig directory for the Ansible user
+      ansible.builtin.file:
+        path: "{{ kubectl_user_home }}/.kube"
+        state: directory
+        owner: "{{ kubectl_user }}"
+        group: "{{ kubectl_user }}"
+        mode: "0700"
+      when: >-
+        kubernetes_admin_conf.stat.exists
+        or kubeadm_init_enabled | bool
+        or kubeadm_control_plane_join_enabled | bool
+
+    - name: Install admin kubeconfig for the Ansible user
+      ansible.builtin.copy:
+        src: /etc/kubernetes/admin.conf
+        dest: "{{ kubectl_kubeconfig }}"
+        remote_src: true
+        owner: "{{ kubectl_user }}"
+        group: "{{ kubectl_user }}"
+        mode: "0600"
+      when: >-
+        kubernetes_admin_conf.stat.exists
+        or kubeadm_init_enabled | bool
+        or kubeadm_control_plane_join_enabled | bool
+
+  handlers:
+    - name: Restart containerd
+      ansible.builtin.systemd_service:
+        name: containerd
+        state: restarted
+        daemon_reload: true

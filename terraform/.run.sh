@@ -21,20 +21,30 @@ set -a
 source "${script_dir}/.env"
 set +a
 
-echo "Terraform operation:"
-echo "  create  - Apply infrastructure and OpenWrt configuration"
-echo "  destroy - Destroy OpenWrt configuration first, then infrastructure"
-echo
-read -r -p "Choose create or destroy: " operation
+clear_k8s_known_hosts() {
+  echo
+  echo "=== Clear Kubernetes SSH known-host entries ==="
 
-case "${operation}" in
-  create|destroy)
-    ;;
-  *)
-    echo "ERROR: Invalid operation: ${operation}. Choose create or destroy." >&2
-    exit 1
-    ;;
-esac
+  awk '
+    /^resource "openwrt_dhcp_host"/ {
+      in_dhcp = 1
+    }
+
+    in_dhcp && /^[[:space:]]*ip[[:space:]]*=/ {
+      line = $0
+      sub(/^[^"]*"/, "", line)
+      sub(/".*$/, "", line)
+      print line
+    }
+
+    in_dhcp && /^[[:space:]]*}/ {
+      in_dhcp = 0
+    }
+  ' "${config_dir}"/*.tf |
+  while IFS= read -r ip; do
+    ssh-keygen -R "$ip" -f "$HOME/.ssh/known_hosts" >/dev/null 2>&1 || true
+  done
+}
 
 run_terraform_root() {
   local root_name="$1"
@@ -95,9 +105,26 @@ run_terraform_root() {
   rm -f "${root_dir}/${plan_file}"
 }
 
+echo "Terraform operation:"
+echo "  create  - Apply infrastructure and OpenWrt configuration"
+echo "  destroy - Destroy OpenWrt configuration first, then infrastructure"
+echo
+read -r -p "Choose create or destroy: " operation
+
+case "${operation}" in
+  create|destroy)
+    ;;
+  *)
+    echo "ERROR: Invalid operation: ${operation}. Choose create or destroy." >&2
+    exit 1
+    ;;
+esac
+
 if [[ "${operation}" == "create" ]]; then
   run_terraform_root "wrt-evpn" "${infra_dir}" "create"
   run_terraform_root "network" "${config_dir}" "create"
+
+  clear_k8s_known_hosts
 else
   run_terraform_root "network" "${config_dir}" "destroy"
   run_terraform_root "wrt-evpn" "${infra_dir}" "destroy"
