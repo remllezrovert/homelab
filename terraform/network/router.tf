@@ -1,21 +1,38 @@
 # ---------------------------------------------------------------------------
 # Deploy OpenWrt firewall policy
 #
-# firewall.uci.tftpl is rendered from var.subnets, staged to the router,
-# validated with `fw4 check`, and atomically installed as /etc/config/firewall
-# before the firewall is restarted.
+# firewall_rules_prepend:
+#   Optional raw UCI sections supplied from the shared terraform.tfvars file.
+#   They are rendered before firewall.uci.tftpl so narrow explicit ACCEPT rules
+#   can precede the generated RFC1918/special-use IPv4 REJECT rules.
 #
-# `scp -O` forces the legacy SCP protocol. This is needed for OpenWrt systems
-# using Dropbear without an installed SFTP server, because modern OpenSSH scp
-# defaults to SFTP.
+# firewall.uci.tftpl:
+#   Generated zone, forwarding, and egress-isolation policy rendered from
+#   var.subnets.
+#
+# The complete rendered UCI configuration is staged to OpenWrt, validated with
+# `fw4 check`, then atomically installed as /etc/config/firewall before fw4 is
+# restarted. If validation fails, the previous file is restored and restarted.
+#
+# `scp -O` forces legacy SCP protocol for Dropbear systems without SFTP.
 # ---------------------------------------------------------------------------
 
 locals {
-  openwrt_firewall_uci = templatefile(
+  openwrt_firewall_generated_uci = templatefile(
     "${path.module}/firewall.uci.tftpl",
     {
       subnets = var.subnets
     },
+  )
+
+  openwrt_firewall_prepend_uci = trimspace(var.firewall_rules_prepend)
+
+  openwrt_firewall_uci = join(
+    "\n\n",
+    compact([
+      local.openwrt_firewall_prepend_uci,
+      trimspace(local.openwrt_firewall_generated_uci),
+    ]),
   )
 
   openwrt_firewall_uci_sha256 = sha256(local.openwrt_firewall_uci)

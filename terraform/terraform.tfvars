@@ -101,6 +101,22 @@ subnets = {
   }
 }
 
+firewall_rules_prepend = <<-UCI
+config forwarding 'k8swrk_to_k8sctl'
+        option src 'k8swrk'
+        option dest 'k8sctl'
+
+config rule 'allow_k8swrk_to_k8sctl_api'
+        option name 'Allow Kubernetes workers to Kubernetes API'
+        option src 'k8swrk'
+        option dest 'k8sctl'
+        option dest_ip '10.8.0.101'
+        option proto 'tcp'
+        option dest_port '6443'
+        option target 'ACCEPT'
+UCI
+
+
 # ---------------------------------------------------------------------------
 # OpenWrt CT management configuration
 #

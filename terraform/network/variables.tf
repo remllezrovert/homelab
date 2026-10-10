@@ -100,3 +100,10 @@ variable "subnets" {
     error_message = "Every subnets.<name>.openwrt_device must be a non-empty OpenWrt device name."
   }
 }
+
+
+variable "firewall_rules_prepend" {
+  type     = string
+  default  = ""
+  nullable = false
+}

@@ -9,38 +9,49 @@
 #
 # Proxmox SDN owns:
 # - EVPN/VNet connectivity
-# - Gateway addresses declared below
+# - Hardcoded .1 gateway addresses declared below
 # - SNAT through EVPN exit nodes
 #
 # OpenWrt owns:
+# - Its existing .2 interface addresses
 # - DHCP and DNS service
 # - In-guest UCI configuration, managed in config-network
 #
-# The canonical VNet/subnet values come from var.subnets, supplied by this
-# root module's terraform.tfvars.
+# var.subnets supplies VNet/subnet definitions and OpenWrt device assignments.
+# Its gateway values remain OpenWrt's addresses and are deliberately NOT used
+# as the Proxmox SDN gateway addresses.
 # ---------------------------------------------------------------------------
 
 # ---------------------------------------------------------------------------
 # Proxmox SDN subnet declarations
 #
-# One PVE subnet object per var.subnets map item:
+# Proxmox gateway ownership:
+#   k8sctl -> 10.8.0.1
+#   k8swrk -> 10.8.1.1
+#   k8sfun -> 10.8.2.1
 #
-#   proxmox_sdn_subnet.subnet["k8sctl"]
-#   proxmox_sdn_subnet.subnet["k8swrk"]
+# OpenWrt retains the corresponding .2 addresses.
 # ---------------------------------------------------------------------------
 
 resource "proxmox_sdn_subnet" "subnet" {
   for_each = var.subnets
 
-  vnet    = proxmox_sdn_vnet.subnet[each.key].id
-  cidr    = each.value.cidr
-  gateway = each.value.gateway
-  snat    = each.value.snat
+  vnet = proxmox_sdn_vnet.subnet[each.key].id
+  cidr = each.value.cidr
+
+  gateway = {
+    k8sctl = "10.8.0.1"
+    k8swrk = "10.8.1.1"
+    k8sfun = "10.8.2.1"
+  }[each.key]
+
+  snat = each.value.snat
 
   depends_on = [
     proxmox_sdn_vnet.subnet,
   ]
 }
+
 resource "proxmox_sdn_applier" "subnet_applier" {
   lifecycle {
     replace_triggered_by = [
@@ -62,6 +73,7 @@ resource "proxmox_sdn_applier" "subnet_applier" {
 # Every extra NIC is generated from var.subnets:
 #   k8sctl -> eth1 -> k8sctl VNet
 #   k8swrk -> eth2 -> k8swrk VNet
+#   k8sfun -> eth3 -> k8sfun VNet
 #
 # The VNet itself is read from the corresponding for_each-created SDN VNet.
 # ---------------------------------------------------------------------------
@@ -106,10 +118,6 @@ resource "proxmox_virtual_environment_container" "openwrt_01" {
   }
 
   # One generated NIC per canonical subnet definition.
-  #
-  # For current terraform.tfvars:
-  #   eth1 -> k8sctl
-  #   eth2 -> k8swrk
   dynamic "network_interface" {
     for_each = var.subnets
 
@@ -139,4 +147,3 @@ resource "proxmox_virtual_environment_container" "openwrt_01" {
     proxmox_sdn_applier.subnet_applier,
   ]
 }
-
