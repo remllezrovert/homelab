@@ -1,36 +1,34 @@
 # ---------------------------------------------------------------------------
-# EVPN VNet subnet services and OpenWrt container
+# VXLAN VNet subnet inventory and OpenWrt container
 #
 # This file owns:
-# - Proxmox SDN subnet gateway/SNAT declarations
+# - Proxmox SDN subnet CIDR declarations
 # - Applying those declarations
 # - The OpenWrt CT lifecycle
-# - OpenWrt CT NIC attachment to every var.subnets EVPN VNet
+# - OpenWrt CT NIC attachment to every var.subnets VNet
 #
 # Proxmox SDN owns:
-# - EVPN/VNet connectivity
-# - Hardcoded .1 gateway addresses declared below
-# - SNAT through EVPN exit nodes
+# - VXLAN/VNet Layer-2 connectivity
+# - Subnet inventory only
 #
 # OpenWrt owns:
-# - Its existing .2 interface addresses
+# - Its existing interface addresses from var.subnets[*].gateway
+# - Routing and firewall policy
+# - Upstream NAT
 # - DHCP and DNS service
 # - In-guest UCI configuration, managed in config-network
 #
-# var.subnets supplies VNet/subnet definitions and OpenWrt device assignments.
-# Its gateway values remain OpenWrt's addresses and are deliberately NOT used
-# as the Proxmox SDN gateway addresses.
+# No gateway address is assigned to Proxmox.
+# Proxmox SNAT is explicitly disabled.
 # ---------------------------------------------------------------------------
 
 # ---------------------------------------------------------------------------
-# Proxmox SDN subnet declarations
+# Proxmox SDN subnet inventory
 #
-# Proxmox gateway ownership:
-#   k8sctl -> 10.8.0.1
-#   k8swrk -> 10.8.1.1
-#   k8sfun -> 10.8.2.1
+# var.subnets[*].gateway remains the OpenWrt address.
+# It is deliberately NOT assigned as a Proxmox subnet gateway.
 #
-# OpenWrt retains the corresponding .2 addresses.
+# var.subnets[*].snat is retained as a legacy input but is not used here.
 # ---------------------------------------------------------------------------
 
 resource "proxmox_sdn_subnet" "subnet" {
@@ -39,16 +37,10 @@ resource "proxmox_sdn_subnet" "subnet" {
   vnet = proxmox_sdn_vnet.subnet[each.key].id
   cidr = each.value.cidr
 
-  gateway = {
-    k8sctl = "10.8.0.1"
-    k8swrk = "10.8.1.1"
-    k8sfun = "10.8.2.1"
-  }[each.key]
-
-  snat = each.value.snat
+  snat = false
 
   depends_on = [
-    proxmox_sdn_vnet.subnet,
+    proxmox_sdn_applier.vnet_applier,
   ]
 }
 
@@ -67,22 +59,21 @@ resource "proxmox_sdn_applier" "subnet_applier" {
 # ---------------------------------------------------------------------------
 # OpenWrt CT infrastructure
 #
-# eth0 is the fixed management NIC:
-#   vmbr0 + VLAN 12 -> 192.168.2.2/24
+# eth0 retains the existing management/upstream connection:
+#   vmbr0 + VLAN 12 -> var.openwrt_ip/24
 #
-# Every extra NIC is generated from var.subnets:
-#   k8sctl -> eth1 -> k8sctl VNet
-#   k8swrk -> eth2 -> k8swrk VNet
-#   k8sfun -> eth3 -> k8sfun VNet
+# Every extra NIC is generated from var.subnets.
+# Device names and VNet attachments remain unchanged.
 #
-# The VNet itself is read from the corresponding for_each-created SDN VNet.
+# In-guest interface addresses, routing, firewall, DHCP, and DNS are managed
+# separately by config-network.
 # ---------------------------------------------------------------------------
 
 resource "proxmox_virtual_environment_container" "openwrt_01" {
   vm_id     = 101
   node_name = "mgmt1"
 
-  description = "OpenWrt DHCP/DNS server for Terraform-managed EVPN VNets"
+  description = "OpenWrt router and DHCP/DNS server for Terraform-managed VXLAN VNets"
   tags        = ["terraform", "openwrt", "dns", "dhcp", "net-utils"]
 
   started       = true
@@ -110,7 +101,7 @@ resource "proxmox_virtual_environment_container" "openwrt_01" {
     size         = 2
   }
 
-  # Fixed management NIC.
+  # Preserve the existing management/upstream NIC.
   network_interface {
     name    = "eth0"
     bridge  = "vmbr0"
@@ -132,8 +123,8 @@ resource "proxmox_virtual_environment_container" "openwrt_01" {
   initialization {
     hostname = "openwrt-01"
 
-    # Proxmox LXC initial management connectivity.
-    # In-guest UCI management is configured by config-network.
+    # Preserve existing Proxmox LXC management initialization.
+    # In-guest UCI configuration is managed by config-network.
     ip_config {
       ipv4 {
         address = "${var.openwrt_ip}/24"

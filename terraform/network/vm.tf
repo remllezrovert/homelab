@@ -4,6 +4,10 @@
 # All VMs clone from template 900. The boot disk is explicitly set to 40 GiB
 # so Kubernetes, containerd images, etcd, package caches, and logs do not
 # inherit the tiny cloud-image root disk size.
+#
+# delete_unreferenced_disks_on_destroy is enabled because these are disposable
+# Kubernetes nodes. It causes inherited/unmanaged disks—including cloud-init
+# drives—to be removed when Terraform destroys the VM.
 # ---------------------------------------------------------------------------
 
 resource "proxmox_cloned_vm" "k8s_worker_01" {
@@ -14,6 +18,8 @@ resource "proxmox_cloned_vm" "k8s_worker_01" {
 
   tags    = ["terraform", "kubernetes", "worker", "evpn", "k8swrk"]
   started = true
+
+  delete_unreferenced_disks_on_destroy = true
 
   clone = {
     source_vm_id     = 900
@@ -66,6 +72,8 @@ resource "proxmox_cloned_vm" "k8s_worker_02" {
   tags    = ["terraform", "kubernetes", "worker", "evpn", "k8swrk"]
   started = true
 
+  delete_unreferenced_disks_on_destroy = true
+
   clone = {
     source_vm_id     = 900
     source_node_name = "mgmt3"
@@ -117,6 +125,8 @@ resource "proxmox_cloned_vm" "k8s_worker_03" {
   tags    = ["terraform", "kubernetes", "worker", "evpn", "k8swrk"]
   started = true
 
+  delete_unreferenced_disks_on_destroy = true
+
   clone = {
     source_vm_id     = 900
     source_node_name = "mgmt3"
@@ -167,6 +177,8 @@ resource "proxmox_cloned_vm" "k8s_control_01" {
 
   tags    = ["terraform", "kubernetes", "control-plane", "evpn", "k8sctl"]
   started = true
+
+  delete_unreferenced_disks_on_destroy = true
 
   clone = {
     source_vm_id     = 900

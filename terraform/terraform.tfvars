@@ -1,79 +1,65 @@
 # ---------------------------------------------------------------------------
-# Proxmox OpenFabric / EVPN / OpenWrt infrastructure
+# Proxmox plain VXLAN / OpenWrt infrastructure
+#
 # This is the non-secret source of truth for:
-# - Proxmox OpenFabric nodes
-# - EVPN controller and zone behavior
-# - EVPN VNet IDs, VNIs, subnet CIDRs, gateways, and SNAT
-# - OpenWrt CT management identity and EVPN NIC assignments
+# - Proxmox host VXLAN peer addresses
+# - Plain VXLAN zone settings
+# - VXLAN VNet IDs, VNIs, subnet CIDRs, and OpenWrt gateway addresses
+# - OpenWrt CT management identity and VNet NIC assignments
+#
 # Secrets belong in .env, never here.
+# ---------------------------------------------------------------------------
 
 # ---------------------------------------------------------------------------
 # Proxmox API
-# `proxmox_api_endpoint` and `proxmox_api_token` should normally come from:
+#
+# Provide these through .env:
 #   TF_VAR_proxmox_api_endpoint
 #   TF_VAR_proxmox_api_token
-# in .env. Do not duplicate credentials here.
-
 # ---------------------------------------------------------------------------
-# OpenFabric underlay
-
-openfabric = {
-  id        = "main"
-  ip_prefix = "10.0.0.0/16"
-}
 
 # ---------------------------------------------------------------------------
 # Proxmox hosts
 #
 # Map key must be the exact Proxmox node name.
 #
-# `openfabric_ipv4` is the OpenFabric router address on that host.
-# `openfabric_interfaces` must contain real, existing host interfaces.
+# vxlan_peer_ipv4 is the reachable underlay IP for that Proxmox host.
+# Every host must be able to reach every other peer over UDP/4789.
 # ---------------------------------------------------------------------------
 
 proxmox_hosts = {
   mgmt1 = {
-    openfabric_ipv4       = "10.0.0.11"
-    openfabric_interfaces = ["vmbr0"]
+    vxlan_peer_ipv4 = "192.168.1.11"
   }
 
   mgmt2 = {
-    openfabric_ipv4       = "10.0.0.12"
-    openfabric_interfaces = ["vmbr0"]
+    vxlan_peer_ipv4 = "192.168.1.12"
   }
 
   mgmt3 = {
-    openfabric_ipv4       = "10.0.0.13"
-    openfabric_interfaces = ["vmbr0"]
+    vxlan_peer_ipv4 = "192.168.1.13"
   }
 }
 
 # ---------------------------------------------------------------------------
-# EVPN controller and zone
+# Plain VXLAN zone
+#
+# The variable name remains `evpn` for existing Terraform compatibility.
+# It no longer contains EVPN controller, exit-node, ASN, VRF, or route-target
+# settings.
 # ---------------------------------------------------------------------------
 
 evpn = {
-  controller_id = "evpn1"
-  zone_id       = "evpn"
-
-  asn       = 65000
-  vrf_vxlan = 4000
-  mtu       = 1450
-  ipam      = "pve"
-
-  advertise_subnets          = true
-  disable_arp_nd_suppression = false
-
-  # PVE EVPN exit-node policy.
-  #
-  # mgmt1 supplies routed/SNAT egress for EVPN subnets where snat = true.
-  exit_nodes               = ["mgmt1"]
-  exit_nodes_local_routing = true
-  primary_exit_node        = "mgmt1"
-
-  rt_import = "65000:65000"
+  zone_id = "evpn"
+  mtu     = 1450
+  ipam    = "pve"
 }
 
+# ---------------------------------------------------------------------------
+# VXLAN VNets and OpenWrt router interfaces
+#
+# gateway is the OpenWrt address on that VNet.
+# Proxmox does not own these gateway addresses and does not perform SNAT.
 # ---------------------------------------------------------------------------
 
 subnets = {
@@ -92,7 +78,8 @@ subnets = {
     snat           = true
     openwrt_device = "eth2"
   }
- k8sfun = {
+
+  k8sfun = {
     vni            = 10003
     cidr           = "10.8.2.0/24"
     gateway        = "10.8.2.2"
@@ -100,6 +87,13 @@ subnets = {
     openwrt_device = "eth3"
   }
 }
+
+# ---------------------------------------------------------------------------
+# OpenWrt firewall policy
+#
+# Workers may initiate Kubernetes API access to the control plane at
+# 10.8.0.101:6443 through OpenWrt's k8sctl interface at 10.8.0.2.
+# ---------------------------------------------------------------------------
 
 firewall_rules_prepend = <<-UCI
 config forwarding 'k8swrk_to_k8sctl'
@@ -116,13 +110,12 @@ config rule 'allow_k8swrk_to_k8sctl_api'
         option target 'ACCEPT'
 UCI
 
-
 # ---------------------------------------------------------------------------
 # OpenWrt CT management configuration
-#
 # ---------------------------------------------------------------------------
+
 dns_domain = "remllez.local"
-openwrt_ip       = "192.168.2.2"
+openwrt_ip = "192.168.2.2"
 openwrt_username = "root"
 
 openwrt_management_network = {

@@ -3,7 +3,7 @@ set -euo pipefail
 
 script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 
-infra_dir="${script_dir}/wrt-evpn"
+infra_dir="${script_dir}/wrt-vxlan"
 config_dir="${script_dir}/network"
 variables_file="${script_dir}/terraform.tfvars"
 
@@ -207,7 +207,7 @@ case "${operation}" in
 esac
 
 if [[ "${operation}" == "create" ]]; then
-  run_terraform_root "wrt-evpn" "${infra_dir}" "create"
+  run_terraform_root "wrt-vxlan" "${infra_dir}" "create"
 
   wait_for_openwrt_ssh
 
@@ -216,5 +216,5 @@ if [[ "${operation}" == "create" ]]; then
   clear_k8s_known_hosts
 else
   run_terraform_root "network" "${config_dir}" "destroy"
-  run_terraform_root "wrt-evpn" "${infra_dir}" "destroy"
+  run_terraform_root "wrt-vxlan" "${infra_dir}" "destroy"
 fi

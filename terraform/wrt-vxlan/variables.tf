@@ -1,24 +1,14 @@
 # ---------------------------------------------------------------------------
-# OpenFabric / EVPN inventory inputs
+# Plain VXLAN / OpenWrt inventory inputs
 #
 # Values are assigned in terraform.tfvars.
 # ---------------------------------------------------------------------------
 
-variable "openfabric" {
-  description = "Proxmox OpenFabric underlay configuration."
-
-  type = object({
-    id        = string
-    ip_prefix = string
-  })
-}
-
 variable "proxmox_hosts" {
-  description = "Proxmox OpenFabric nodes keyed by exact Proxmox node name."
+  description = "Proxmox nodes keyed by exact Proxmox node name."
 
   type = map(object({
-    openfabric_ipv4       = string
-    openfabric_interfaces = set(string)
+    vxlan_peer_ipv4 = string
   }))
 
   validation {
@@ -29,44 +19,29 @@ variable "proxmox_hosts" {
   validation {
     condition = alltrue([
       for host in values(var.proxmox_hosts) :
-      can(cidrhost("${host.openfabric_ipv4}/32", 0))
+      can(cidrhost("${host.vxlan_peer_ipv4}/32", 0))
     ])
-    error_message = "Every proxmox_hosts.openfabric_ipv4 value must be a valid IPv4 address."
+    error_message = "Every proxmox_hosts.vxlan_peer_ipv4 value must be a valid IPv4 address."
   }
 }
 
 variable "evpn" {
-  description = "Proxmox EVPN controller and zone settings."
+  description = "Legacy variable name retained for terraform.tfvars compatibility; contains plain VXLAN zone settings only."
 
   type = object({
-    controller_id              = string
-    zone_id                    = string
-    asn                        = number
-    vrf_vxlan                  = number
-    mtu                        = number
-    ipam                       = string
-    advertise_subnets          = bool
-    disable_arp_nd_suppression = bool
-    exit_nodes                 = list(string)
-    exit_nodes_local_routing   = bool
-    primary_exit_node          = string
-    rt_import                  = string
+    zone_id = string
+    mtu     = number
+    ipam    = string
   })
 
   validation {
-    condition = alltrue([
-      contains(keys(var.proxmox_hosts), var.evpn.primary_exit_node),
-      alltrue([
-        for node in var.evpn.exit_nodes :
-        contains(keys(var.proxmox_hosts), node)
-      ]),
-    ])
-    error_message = "evpn.primary_exit_node and every evpn.exit_nodes entry must exist in proxmox_hosts."
+    condition     = var.evpn.mtu > 0
+    error_message = "evpn.mtu must be greater than zero."
   }
 }
 
 variable "subnets" {
-  description = "Canonical Proxmox EVPN VNet and OpenWrt NIC inventory, keyed by VNet ID."
+  description = "Canonical VXLAN VNet and OpenWrt NIC inventory, keyed by VNet ID."
 
   type = map(object({
     vni            = number
@@ -78,7 +53,7 @@ variable "subnets" {
 
   validation {
     condition     = length(var.subnets) > 0
-    error_message = "subnets must define at least one EVPN VNet."
+    error_message = "subnets must define at least one VXLAN VNet."
   }
 
   validation {
@@ -112,4 +87,11 @@ variable "subnets" {
 
     error_message = "Each subnet must use a unique openwrt_device such as eth1, eth2, eth3."
   }
+}
+
+variable "firewall_rules_prepend" {
+  description = "Optional raw OpenWrt UCI firewall fragment prepended to the generated firewall configuration."
+
+  type    = string
+  default = ""
 }
