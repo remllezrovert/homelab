@@ -25,7 +25,7 @@ variable "proxmox_hosts" {
   }
 }
 
-variable "evpn" {
+variable "vxlan" {
   description = "Legacy variable name retained for terraform.tfvars compatibility; contains plain VXLAN zone settings only."
 
   type = object({
@@ -35,8 +35,8 @@ variable "evpn" {
   })
 
   validation {
-    condition     = var.evpn.mtu > 0
-    error_message = "evpn.mtu must be greater than zero."
+    condition     = var.vxlan.mtu > 0
+    error_message = "vxlan.mtu must be greater than zero."
   }
 }
 

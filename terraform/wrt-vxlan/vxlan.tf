@@ -12,7 +12,7 @@ resource "proxmox_sdn_applier" "initial_applier" {}
 # ---------------------------------------------------------------------------
 
 resource "proxmox_sdn_zone_vxlan" "main" {
-  id    = var.evpn.zone_id
+  id    = var.vxlan.zone_id
   nodes = sort(keys(var.proxmox_hosts))
 
   peers = toset([
@@ -20,8 +20,8 @@ resource "proxmox_sdn_zone_vxlan" "main" {
     host.vxlan_peer_ipv4
   ])
 
-  mtu  = var.evpn.mtu
-  ipam = var.evpn.ipam
+  mtu  = var.vxlan.mtu
+  ipam = var.vxlan.ipam
 
   depends_on = [
     proxmox_sdn_applier.initial_applier,

@@ -44,13 +44,12 @@ proxmox_hosts = {
 # ---------------------------------------------------------------------------
 # Plain VXLAN zone
 #
-# The variable name remains `evpn` for existing Terraform compatibility.
 # It no longer contains EVPN controller, exit-node, ASN, VRF, or route-target
 # settings.
 # ---------------------------------------------------------------------------
 
-evpn = {
-  zone_id = "evpn"
+vxlan = {
+  zone_id = "vxlan"
   mtu     = 1450
   ipam    = "pve"
 }
