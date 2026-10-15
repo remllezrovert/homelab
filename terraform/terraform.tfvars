@@ -107,7 +107,29 @@ config rule 'allow_k8swrk_to_k8sctl_api'
         option proto 'tcp'
         option dest_port '6443'
         option target 'ACCEPT'
+
+config rule 'allow_lan_to_k8s_api'
+        option name 'Allow management host to Kubernetes API'
+        option src 'lan'
+        option src_ip '192.168.2.2'
+        option dest 'k8sctl'
+        option dest_ip '10.8.0.101'
+        option proto 'tcp'
+        option dest_port '6443'
+        option target 'ACCEPT'
+
+config rule 'allow_lan_to_k8s_worker_ssh'
+        option name 'Allow management host to Kubernetes worker SSH'
+        option src 'lan'
+        option src_ip '192.168.2.2'
+        option dest 'k8swrk'
+        option dest_ip '10.8.1.0/24'
+        option proto 'tcp'
+        option dest_port '22'
+        option target 'ACCEPT'
 UCI
+
+
 
 # ---------------------------------------------------------------------------
 # OpenWrt CT management configuration
